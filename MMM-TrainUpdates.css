@@ -1,0 +1,40 @@
+.mmm-train-updates .train-table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+.mmm-train-updates .train-row td {
+	padding: 4px 10px 4px 0;
+	line-height: 1.4em;
+}
+
+.mmm-train-updates .time-cell {
+	font-variant-numeric: tabular-nums;
+	width: 60px;
+}
+
+.mmm-train-updates .line-cell {
+	font-weight: bold;
+}
+
+.mmm-train-updates .platform-cell {
+	opacity: 0.7;
+}
+
+.mmm-train-updates .delay-cell {
+	font-variant-numeric: tabular-nums;
+	text-align: right;
+}
+
+.mmm-train-updates .delay-cell.on-time {
+	color: #6cc644;
+}
+
+.mmm-train-updates .delay-cell.late {
+	color: #e8b339;
+}
+
+.mmm-train-updates .delay-cell.late-critical {
+	color: #d9534f;
+	font-weight: bold;
+}
