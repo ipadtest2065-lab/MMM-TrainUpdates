@@ -20,9 +20,13 @@ Module.register("MMM-TrainUpdates", {
 		maxTrips: 5,                // How many upcoming trips to show
 		updateInterval: 60 * 1000,  // How often to refresh data (ms)
 		retryDelay: 5000,           // Delay before retrying after a fetch error (ms)
+		countdownRefresh: 15 * 1000, // How often to re-render the "X min" countdown (ms), no new fetch
 		animationSpeed: 1000,       // Fade speed when updating the DOM (ms)
 		showPlatform: true,
 		showDelay: true,
+		showDuration: true,
+		trainOnly: true,            // Exclude all non-train modes (metro, light rail, bus, coach, ferry, school bus)
+		excludedModes: [],          // Advanced: override which mode IDs to exclude, e.g. [2,4,5,7,9,11]. Leave empty to use trainOnly.
 		lateCriticalLimitMin: 10,   // Minutes late before a departure is flagged red
 		timeFormat: 24,             // 24 or 12
 		fade: true,
@@ -37,6 +41,14 @@ Module.register("MMM-TrainUpdates", {
 		this.loaded = false;
 		this.errorMessage = null;
 		this.scheduleUpdate(0);
+
+		// Re-render on a faster cadence than the data refresh so the "X min"
+		// countdown stays roughly live without hammering the TfNSW API.
+		setInterval(() => {
+			if (this.loaded && !this.errorMessage) {
+				this.updateDom(0);
+			}
+		}, this.config.countdownRefresh);
 	},
 
 	getStyles: function () {
@@ -57,6 +69,8 @@ Module.register("MMM-TrainUpdates", {
 				fromStation: this.config.fromStation,
 				toStation: this.config.toStation,
 				maxTrips: this.config.maxTrips,
+				trainOnly: this.config.trainOnly,
+				excludedModes: this.config.excludedModes,
 			});
 		}, nextLoad);
 	},
@@ -115,59 +129,84 @@ Module.register("MMM-TrainUpdates", {
 			return wrapper;
 		}
 
-		const table = document.createElement("table");
-		table.className = "small train-table";
-
 		this.trips.forEach((trip, index) => {
-			const row = document.createElement("tr");
-			row.className = "train-row";
+			const card = document.createElement("div");
+			card.className = "train-card";
 
-			// Departure time cell
-			const timeCell = document.createElement("td");
-			timeCell.className = "align-left time-cell";
-			timeCell.innerHTML = this.formatTime(trip.estimatedDeparture);
-			row.appendChild(timeCell);
+			// Left: minutes-until countdown
+			const countdown = document.createElement("div");
+			countdown.className = "countdown";
+			const minsUntil = this.minutesUntil(trip.estimatedDeparture);
+			countdown.innerHTML =
+				minsUntil === null
+					? ""
+					: `<span class="num">${minsUntil <= 0 ? "Now" : minsUntil}</span>` +
+					  (minsUntil > 0 ? `<span class="unit">min</span>` : "");
+			card.appendChild(countdown);
 
-			// Line / service cell
-			const lineCell = document.createElement("td");
-			lineCell.className = "align-left bright line-cell";
-			lineCell.innerHTML = trip.line || "";
-			row.appendChild(lineCell);
+			// Main content
+			const main = document.createElement("div");
+			main.className = "card-main";
 
-			// Destination cell
-			const destCell = document.createElement("td");
-			destCell.className = "align-left dest-cell";
-			destCell.innerHTML = trip.destination || "";
-			row.appendChild(destCell);
+			const badgeRow = document.createElement("div");
+			badgeRow.className = "badge-row";
+			(trip.lines || []).forEach((lineName) => {
+				if (!lineName) return;
+				const badge = document.createElement("span");
+				badge.className = "line-badge " + this.lineBadgeClass(lineName);
+				badge.innerHTML = lineName;
+				badgeRow.appendChild(badge);
+			});
+			const routeTitle = document.createElement("span");
+			routeTitle.className = "route-title bright";
+			routeTitle.innerHTML = trip.destination || "";
+			badgeRow.appendChild(routeTitle);
+			main.appendChild(badgeRow);
 
-			// Platform cell
-			if (this.config.showPlatform) {
-				const platformCell = document.createElement("td");
-				platformCell.className = "align-center platform-cell";
-				platformCell.innerHTML = trip.platform ? "Plat " + trip.platform : "";
-				row.appendChild(platformCell);
-			}
-
-			// Delay cell
-			if (this.config.showDelay) {
-				const delayCell = document.createElement("td");
-				delayCell.className = "align-right delay-cell";
-				if (trip.isRealtime && trip.delayMinutes !== 0) {
-					const sign = trip.delayMinutes > 0 ? "+" : "";
-					delayCell.innerHTML = sign + trip.delayMinutes + "m";
-					if (trip.delayMinutes >= this.config.lateCriticalLimitMin) {
-						delayCell.className += " late-critical";
-					} else if (trip.delayMinutes > 0) {
-						delayCell.className += " late";
-					}
-				} else if (trip.isRealtime) {
-					delayCell.innerHTML = "on time";
-					delayCell.className += " on-time";
-				} else {
-					delayCell.innerHTML = "";
+			const timeRow = document.createElement("div");
+			timeRow.className = "time-row";
+			let timeRowHtml = this.formatTime(trip.estimatedDeparture);
+			if (this.config.showDuration && trip.durationMinutes) {
+				timeRowHtml += ` <span class="duration">(${trip.durationMinutes}min)</span>`;
+				if (trip.arrivalTime) {
+					timeRowHtml += ` &rarr; ${this.formatTime(trip.arrivalTime)}`;
 				}
-				row.appendChild(delayCell);
 			}
+			timeRow.innerHTML = timeRowHtml;
+			main.appendChild(timeRow);
+
+			const statusRow = document.createElement("div");
+			statusRow.className = "status-row";
+			let statusText = "";
+			let statusCls = "on-time";
+			if (this.config.showDelay) {
+				if (trip.isRealtime && trip.delayMinutes > 0) {
+					statusCls = trip.delayMinutes >= this.config.lateCriticalLimitMin ? "late-critical" : "late";
+					statusText = trip.delayMinutes + "m late";
+				} else if (trip.isRealtime) {
+					statusText = "On-time";
+				}
+			}
+			let fromText = "";
+			if (trip.originStationName) {
+				fromText = "from " + trip.originStationName;
+				if (this.config.showPlatform && trip.platform) {
+					fromText += ", Platform " + trip.platform;
+				}
+			} else if (this.config.showPlatform && trip.platform) {
+				fromText = "Platform " + trip.platform;
+			}
+			let statusHtml = "";
+			if (statusText) {
+				statusHtml += `<span class="status-dot ${statusCls}">&#9679;</span> <span class="${statusCls}">${statusText}</span>`;
+			}
+			if (fromText) {
+				statusHtml += (statusHtml ? " " : "") + fromText;
+			}
+			statusRow.innerHTML = statusHtml;
+			main.appendChild(statusRow);
+
+			card.appendChild(main);
 
 			if (this.config.fade && this.config.fadePoint < 1) {
 				let fadePoint = this.config.fadePoint;
@@ -176,15 +215,31 @@ Module.register("MMM-TrainUpdates", {
 				const steps = this.trips.length - startingPoint;
 				if (index >= startingPoint) {
 					const currentStep = index - startingPoint;
-					row.style.opacity = 1 - (1 / steps) * currentStep;
+					card.style.opacity = 1 - (1 / steps) * currentStep;
 				}
 			}
 
-			table.appendChild(row);
+			wrapper.appendChild(card);
 		});
 
-		wrapper.appendChild(table);
 		return wrapper;
+	},
+
+	minutesUntil: function (isoString) {
+		if (!isoString) return null;
+		const diffMs = new Date(isoString).getTime() - Date.now();
+		return Math.round(diffMs / 60000);
+	},
+
+	// Maps a line code (T1, T9, M1, ...) to a CSS class for badge colouring.
+	// Falls back to a neutral colour for anything not explicitly listed.
+	lineBadgeClass: function (lineName) {
+		const code = (lineName || "").trim().toUpperCase();
+		const known = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "M1"];
+		if (known.includes(code)) {
+			return "line-" + code.toLowerCase();
+		}
+		return "line-default";
 	},
 
 	formatTime: function (isoString) {
