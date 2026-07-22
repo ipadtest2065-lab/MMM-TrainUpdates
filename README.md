@@ -10,6 +10,9 @@ instead searches an actual journey between a `fromStation` and a
 `toStation`, so you get live updates for trips that actually get you
 where you're going (rather than every train leaving a station).
 
+<img width="576" height="733" alt="image" src="https://github.com/user-attachments/assets/d6b98c27-a4b8-4835-80d1-c47ee2fc55af" />
+
+
 ## Dependencies
 
 - A [MagicMirror²](https://github.com/MagicMirrorOrg/MagicMirror) installation
